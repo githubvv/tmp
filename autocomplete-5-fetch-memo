@@ -1,0 +1,158 @@
+//Memo
+
+import React, { useState, useRef, useMemo } from "react";
+import TextField from "@mui/material/TextField";
+import Paper from "@mui/material/Paper";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
+
+const AutocompleteTextField = () => {
+  const [inputValue, setInputValue] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [isLoading, setIsLoading] = useState(false);
+  const textFieldRef = useRef(null);
+
+  const fetchSuggestions = async (query) => {
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/suggestions?query=${query}`);
+      const data = await response.json();
+      setSuggestions(data);
+    } catch (error) {
+      console.error("Error fetching suggestions:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleChange = (event) => {
+    const value = event.target.value;
+    setInputValue(value);
+
+    const cursorPosition = event.target.selectionStart;
+    const triggerPosition = value.lastIndexOf("@", cursorPosition - 1);
+
+    if (triggerPosition !== -1 && triggerPosition < cursorPosition) {
+      const query = value.slice(triggerPosition + 1, cursorPosition);
+      if (query) {
+        fetchSuggestions(query);
+        setMenuVisible(true);
+
+        // Calculate menu position
+        calculateMenuPosition(triggerPosition, cursorPosition);
+      } else {
+        setMenuVisible(false);
+      }
+    } else {
+      setMenuVisible(false);
+    }
+  };
+
+  const calculateMenuPosition = (triggerPosition, cursorPosition) => {
+    if (!textFieldRef.current) return;
+
+    // Use `useMemo` for memoizing menu position calculations
+    const textBeforeCursor = inputValue.slice(0, cursorPosition);
+    const span = document.createElement("span");
+    span.style.visibility = "hidden";
+    span.style.position = "absolute";
+    span.style.whiteSpace = "pre";
+    span.style.font = window.getComputedStyle(textFieldRef.current).font;
+    span.textContent = textBeforeCursor;
+
+    document.body.appendChild(span);
+    const { width } = span.getBoundingClientRect();
+    document.body.removeChild(span);
+
+    const textFieldRect = textFieldRef.current.getBoundingClientRect();
+    setMenuPosition({
+      top: textFieldRect.top + textFieldRef.current.offsetHeight,
+      left: textFieldRect.left + width + 10,
+    });
+  };
+
+  const filteredSuggestions = useMemo(() => {
+    return suggestions;
+  }, [suggestions]);
+
+  const menuStyle = useMemo(
+    () => ({
+      position: "absolute",
+      top: `${menuPosition.top}px`,
+      left: `${menuPosition.left}px`,
+      zIndex: 1000,
+    }),
+    [menuPosition]
+  );
+
+  const handleSelect = (suggestion) => {
+    const cursorPosition = inputValue.lastIndexOf("@");
+    const beforeTrigger = inputValue.slice(0, cursorPosition);
+    const afterTrigger = inputValue.slice(cursorPosition + 1);
+
+    const newValue = `${beforeTrigger}@${suggestion.value} ${afterTrigger}`;
+    setInputValue(newValue);
+    setMenuVisible(false);
+    setSelectedIndex(-1);
+  };
+
+  const handleKeyDown = (event) => {
+    if (!menuVisible) return;
+
+    if (event.key === "ArrowDown") {
+      setSelectedIndex((prevIndex) => (prevIndex + 1) % filteredSuggestions.length);
+    } else if (event.key === "ArrowUp") {
+      setSelectedIndex((prevIndex) =>
+        prevIndex === 0 ? filteredSuggestions.length - 1 : prevIndex - 1
+      );
+    } else if (event.key === "Enter" && selectedIndex >= 0) {
+      handleSelect(filteredSuggestions[selectedIndex]);
+    } else if (event.key === "Escape") {
+      setMenuVisible(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "relative", width: "300px" }}>
+      <TextField
+        ref={textFieldRef}
+        fullWidth
+        variant="outlined"
+        value={inputValue}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        placeholder="Type @ to mention a user"
+        multiline
+      />
+      {menuVisible && filteredSuggestions.length > 0 && (
+        <Paper style={menuStyle}>
+          <List>
+            {isLoading ? (
+              <ListItem>
+                <ListItemButton>Loading...</ListItemButton>
+              </ListItem>
+            ) : (
+              filteredSuggestions.map((suggestion, index) => (
+                <ListItem
+                  key={suggestion.value}
+                  disablePadding
+                  selected={index === selectedIndex}
+                >
+                  <ListItemButton onClick={() => handleSelect(suggestion)}>
+                    {suggestion.label}
+                  </ListItemButton>
+                </ListItem>
+              ))
+            )}
+          </List>
+        </Paper>
+      )}
+    </div>
+  );
+};
+
+export default AutocompleteTextField;
